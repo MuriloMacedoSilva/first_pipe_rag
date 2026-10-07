@@ -7,6 +7,29 @@ from app.rag.retriever import RAGRetriever
 from app.rag.vector_store import ChromaVectorStore, VectorSearchResult
 
 
+MEANINGFUL_CONTENT = (
+    "This chunk contains enough useful information to pass the content filter."
+)
+
+
+def make_result(
+    *,
+    content: str = MEANINGFUL_CONTENT,
+    distance: float | None = 0.4,
+    relative_path: str = "docs/guide.md",
+    chunk_index: int = 0,
+) -> VectorSearchResult:
+    return VectorSearchResult(
+        id=f"{relative_path}::{chunk_index}",
+        content=content,
+        filename=relative_path.rsplit("/", 1)[-1],
+        relative_path=relative_path,
+        section="Introduction",
+        chunk_index=chunk_index,
+        distance=distance,
+    )
+
+
 @pytest.fixture
 def embedding_service() -> Mock:
     service = Mock(spec=GoogleEmbeddingService)
@@ -17,33 +40,16 @@ def embedding_service() -> Mock:
 @pytest.fixture
 def vector_store() -> Mock:
     store = Mock(spec=ChromaVectorStore)
-    store.count.return_value = 3
+    store.count.return_value = 10
     store.query.return_value = []
     return store
-
-
-@pytest.fixture
-def search_results() -> list[VectorSearchResult]:
-    return [
-        VectorSearchResult(
-            id="docs/guide.md::0",
-            content="Relevant content",
-            filename="guide.md",
-            relative_path="docs/guide.md",
-            section="Introduction",
-            chunk_index=0,
-            distance=0.1,
-        )
-    ]
 
 
 def test_valid_query_generates_embedding(
     embedding_service: Mock,
     vector_store: Mock,
 ) -> None:
-    retriever = RAGRetriever(embedding_service, vector_store)
-
-    retriever.retrieve("How does it work?")
+    RAGRetriever(embedding_service, vector_store).retrieve("How does it work?")
 
     embedding_service.embed_text.assert_called_once_with("How does it work?")
 
@@ -58,29 +64,176 @@ def test_query_embedding_is_sent_to_vector_store(
 
     vector_store.query.assert_called_once_with(
         embedding=[0.2, 0.8],
-        n_results=5,
+        n_results=10,
     )
 
 
-def test_top_k_is_passed_to_vector_store(
+def test_result_below_distance_threshold_is_kept(
     embedding_service: Mock,
     vector_store: Mock,
 ) -> None:
-    RAGRetriever(embedding_service, vector_store).retrieve("Question", top_k=10)
-
-    assert vector_store.query.call_args.kwargs["n_results"] == 10
-
-
-def test_vector_store_results_are_returned_unchanged(
-    embedding_service: Mock,
-    vector_store: Mock,
-    search_results: list[VectorSearchResult],
-) -> None:
-    vector_store.query.return_value = search_results
+    result = make_result(distance=0.84)
+    vector_store.query.return_value = [result]
 
     results = RAGRetriever(embedding_service, vector_store).retrieve("Question")
 
-    assert results is search_results
+    assert results == [result]
+
+
+def test_result_above_distance_threshold_is_discarded(
+    embedding_service: Mock,
+    vector_store: Mock,
+) -> None:
+    vector_store.query.return_value = [make_result(distance=0.86)]
+
+    results = RAGRetriever(embedding_service, vector_store).retrieve("Question")
+
+    assert results == []
+
+
+def test_result_at_distance_threshold_is_kept(
+    embedding_service: Mock,
+    vector_store: Mock,
+) -> None:
+    result = make_result(distance=0.85)
+    vector_store.query.return_value = [result]
+
+    assert RAGRetriever(embedding_service, vector_store).retrieve("Question") == [
+        result
+    ]
+
+
+def test_result_without_distance_is_kept(
+    embedding_service: Mock,
+    vector_store: Mock,
+) -> None:
+    result = make_result(distance=None)
+    vector_store.query.return_value = [result]
+
+    assert RAGRetriever(embedding_service, vector_store).retrieve("Question") == [
+        result
+    ]
+
+
+def test_header_only_chunk_is_discarded(
+    embedding_service: Mock,
+    vector_store: Mock,
+) -> None:
+    vector_store.query.return_value = [
+        make_result(content="## Modern Activation Functions")
+    ]
+
+    results = RAGRetriever(embedding_service, vector_store).retrieve("Question")
+
+    assert results == []
+
+
+def test_header_with_enough_content_is_kept(
+    embedding_service: Mock,
+    vector_store: Mock,
+) -> None:
+    result = make_result(
+        content=(
+            "## Modern Activation Functions\n\n"
+            "ReLU returns zero for negative values and preserves positive values."
+        )
+    )
+    vector_store.query.return_value = [result]
+
+    assert RAGRetriever(embedding_service, vector_store).retrieve("Question") == [
+        result
+    ]
+
+
+def test_useful_code_chunk_is_kept(
+    embedding_service: Mock,
+    vector_store: Mock,
+) -> None:
+    result = make_result(content="```python\ndef backward():\n    ...\n```")
+    vector_store.query.return_value = [result]
+
+    assert RAGRetriever(embedding_service, vector_store).retrieve("Question") == [
+        result
+    ]
+
+
+def test_query_requests_more_candidates_than_top_k(
+    embedding_service: Mock,
+    vector_store: Mock,
+) -> None:
+    vector_store.count.return_value = 100
+
+    RAGRetriever(
+        embedding_service,
+        vector_store,
+        candidate_multiplier=3,
+    ).retrieve("Question", top_k=4)
+
+    assert vector_store.query.call_args.kwargs["n_results"] == 12
+
+
+def test_final_results_never_exceed_top_k(
+    embedding_service: Mock,
+    vector_store: Mock,
+) -> None:
+    vector_store.query.return_value = [
+        make_result(chunk_index=index) for index in range(6)
+    ]
+
+    results = RAGRetriever(embedding_service, vector_store).retrieve(
+        "Question", top_k=3
+    )
+
+    assert len(results) == 3
+
+
+def test_candidate_count_does_not_exceed_collection_count(
+    embedding_service: Mock,
+    vector_store: Mock,
+) -> None:
+    vector_store.count.return_value = 7
+
+    RAGRetriever(embedding_service, vector_store).retrieve("Question", top_k=5)
+
+    assert vector_store.query.call_args.kwargs["n_results"] == 7
+
+
+def test_all_filtered_results_return_empty_list(
+    embedding_service: Mock,
+    vector_store: Mock,
+) -> None:
+    vector_store.query.return_value = [
+        make_result(distance=0.9),
+        make_result(content="# Header", chunk_index=1),
+    ]
+
+    assert RAGRetriever(embedding_service, vector_store).retrieve("Question") == []
+
+
+def test_filters_preserve_original_ranking_order(
+    embedding_service: Mock,
+    vector_store: Mock,
+) -> None:
+    first = make_result(distance=0.2, chunk_index=0)
+    filtered = make_result(distance=0.9, chunk_index=1)
+    second = make_result(distance=0.4, chunk_index=2)
+    vector_store.query.return_value = [first, filtered, second]
+
+    results = RAGRetriever(embedding_service, vector_store).retrieve("Question")
+
+    assert results == [first, second]
+
+
+def test_duplicate_chunk_is_returned_only_once(
+    embedding_service: Mock,
+    vector_store: Mock,
+) -> None:
+    result = make_result()
+    vector_store.query.return_value = [result, result]
+
+    results = RAGRetriever(embedding_service, vector_store).retrieve("Question")
+
+    assert results == [result]
 
 
 def test_empty_query_raises_error(
