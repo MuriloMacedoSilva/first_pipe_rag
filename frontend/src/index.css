@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  --font-display: Georgia, "Times New Roman", serif;
+}
+
+:root {
+  font-family: var(--font-sans);
+  color: #172033;
+  background: #f0eee7;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: #f0eee7;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+.loading-dots {
+  display: inline-block;
+  width: 1.2rem;
+  overflow: hidden;
+  vertical-align: bottom;
+  animation: reveal-dots 1.2s steps(4, end) infinite;
+}
+
+@keyframes reveal-dots {
+  from {
+    width: 0;
+  }
+
+  to {
+    width: 1.2rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

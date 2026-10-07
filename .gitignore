@@ -1,0 +1,20 @@
+# Environment and secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.tsbuildinfo
+.venv/
+venv/
+
+# Frontend build artifacts
+node_modules/
+dist/
+
+# Local vector database artifacts
+chroma/
+chroma_db/
+vector_store/
+*.faiss
+*.index
