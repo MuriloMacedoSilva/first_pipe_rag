@@ -33,7 +33,7 @@ cd backend
 Crie o ambiente virtual:
 
 ```bash
-python3 -m venv .venv
+python -m venv .venv
 ```
 
 Ative o ambiente virtual no Linux ou macOS:
@@ -45,7 +45,7 @@ source .venv/bin/activate
 No Windows (PowerShell), use:
 
 ```powershell
-.venv\Scripts\Activate.ps1
+source .venv/Scripts/activate
 ```
 
 Instale as dependências:
